@@ -9,7 +9,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -105,6 +105,11 @@ for (const [name, directory] of [...members].sort(([left], [right]) => left.loca
   if (!platformOk) {
     console.error(`skipping ${name}: not for ${process.platform}/${process.arch}`)
     continue
+  }
+  const declaredFiles = Array.isArray(manifest.files) ? manifest.files : []
+  const hasBuiltPayload = declaredFiles.some(entry => !entry.startsWith('!') && existsSync(join(directory, entry.replace(/\/$/, ''))))
+  if (declaredFiles.length > 0 && !hasBuiltPayload) {
+    throw new Error(`${name} declares files but none exist: run \`pnpm run build\` before staging`)
   }
   const relativePath = relative(APP_DIR, directory)
   console.error(`packing ${name} (${relativePath})`)

@@ -12,6 +12,18 @@ import { fileURLToPath } from 'node:url'
 import type { Win32DialogWorkerData } from './win32-dialog-worker.ts'
 
 /**
+ * Build the dialog worker's child environment. Under Electron, `process.execPath`
+ * is the app executable, so the child must opt into Node mode
+ * (`ELECTRON_RUN_AS_NODE`) before it can run the bundled worker entry.
+ * @param base - the inherited environment plus the dialog title.
+ * @param isElectron - whether the spawning host is an Electron main process.
+ * @returns the child environment.
+ */
+export function dialogWorkerEnvironment(base: NodeJS.ProcessEnv, isElectron: boolean): NodeJS.ProcessEnv {
+  return isElectron ? { ...base, ELECTRON_RUN_AS_NODE: '1' } : { ...base }
+}
+
+/**
  * Spawn the dialog child process. Built consumers launch the bundled CJS
  * entry next to this module under plain node; unbuilt (source) consumers
  * bootstrap tsx first, mirroring the dsh CLI's source launch. The dialog is
@@ -21,7 +33,11 @@ import type { Win32DialogWorkerData } from './win32-dialog-worker.ts'
  * @returns the spawned child process.
  */
 export function spawnDialogWorker(data: Win32DialogWorkerData): ReturnType<typeof spawn> {
-  const env = { ...process.env, DSH_DIALOG_TITLE: data.title }
+  /* v8 ignore next -- the Electron arm only runs inside the packaged shell; the helper's unit tests cover both outcomes. */
+  const env = dialogWorkerEnvironment(
+    { ...process.env, DSH_DIALOG_TITLE: data.title },
+    process.versions.electron !== undefined,
+  )
   const stdio: StdioOptions = ['ignore', 'inherit', 'inherit', 'ipc']
   /* v8 ignore next 3 -- the built-output arm: tests always run unbuilt (src/) */
   if (!import.meta.url.endsWith('.ts')) {
