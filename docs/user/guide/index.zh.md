@@ -4,6 +4,16 @@
 
 先按照[根 README](../../../README.md#run)启动 Web UI；命令会打印其访问地址。本指南从服务器已经运行的状态开始。`dsh` 进程会把调用目录作为默认文件系统位置，但新的 Web UI 在添加工作区前不会选中任何工作区。
 
+## 从桌面快捷方式启动（Windows）
+
+在 Windows 上可以像桌面应用一样启动 Web UI。先在仓库目录的 PowerShell 中运行一次快捷方式安装脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\create-web-shortcut.ps1
+```
+
+双击桌面上的 **DeepSeek Harness Web** 快捷方式：启动器会运行 `npx --yes @deepseek-ai/dsh web`，等服务就绪后在默认浏览器中打开命令打印的地址。服务器运行在最小化的控制台窗口中；关闭该窗口或运行 `scripts\stop-web.ps1` 即可停止。
+
 ## 配置模型
 
 打开**设置 → 模型**，输入 DeepSeek API 密钥并保存。模型路由会立即可用，不需要重启服务器。
