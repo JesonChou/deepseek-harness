@@ -1,0 +1,24 @@
+# Desktop-surface overlay applied after the dsh-web-app bundle layer. The
+# renderer never talks to the embedded HTTP server: the Electron main process
+# bridges renderer fetch/stream calls to it in-process, so the port is
+# ephemeral and the bind stays loopback-only.
+- id: webserver
+  config:
+    host: '127.0.0.1'
+    port: 0
+
+# The web-runtime glue prints a URL line and injects the web-surface prompt
+# section; neither describes a desktop window.
+- id: web-runtime
+  config:
+    printUrl: false
+    surfaceContext: false
+    trustedHosts: !!js ctx.webStartup.trustedHosts
+
+# Session logs follow the project instead of the Harness home. The desktop
+# main restates this row with the persisted project roots at boot, so the
+# empty list below is only the composition default.
+- id: session-persistence-jsonl
+  config:
+    root: !!js dshHomePath('sessions')
+    projectRoots: []

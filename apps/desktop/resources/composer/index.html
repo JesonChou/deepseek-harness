@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:" />
+  <title>插件拼接 / Composition</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      background: #12141a;
+      color: #e6e8ee;
+      font: 13px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #262a35;
+    }
+    header h1 { font-size: 15px; margin: 0; font-weight: 600; flex: 1; }
+    button {
+      background: #262c3d;
+      color: #e6e8ee;
+      border: 1px solid #3a4152;
+      border-radius: 6px;
+      padding: 5px 12px;
+      cursor: pointer;
+    }
+    button.primary { background: #3c5bff; border-color: #3c5bff; color: #fff; }
+    button:disabled { opacity: .5; cursor: default; }
+    #status { color: #8b93a7; min-height: 1.4em; }
+    #status.ok { color: #4ade80; }
+    #status.error { color: #f87171; }
+    main { flex: 1; display: flex; min-height: 0; }
+    section { padding: 12px; display: flex; flex-direction: column; min-width: 0; }
+    #tree { flex: 1.2; border-right: 1px solid #262a35; overflow: auto; }
+    #patch { flex: 1; }
+    h2 { font-size: 13px; margin: 0 0 8px; font-weight: 600; color: #aeb6c6; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #1f2330; vertical-align: top; }
+    th { color: #8b93a7; font-weight: 500; position: sticky; top: 0; background: #12141a; }
+    td.mono { font-family: ui-monospace, Consolas, monospace; }
+    .tag { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 11px; }
+    .tag.on { background: #16341f; color: #4ade80; }
+    .tag.off { background: #3a2a20; color: #fbbf24; }
+    textarea {
+      flex: 1;
+      resize: none;
+      background: #0d0f14;
+      color: #e6e8ee;
+      border: 1px solid #2c3140;
+      border-radius: 6px;
+      padding: 10px;
+      font: 12px/1.45 ui-monospace, Consolas, monospace;
+      white-space: pre;
+    }
+    pre.detail {
+      margin: 0;
+      max-width: 460px;
+      max-height: 6em;
+      overflow: auto;
+      color: #8b93a7;
+      font: 11px/1.35 ui-monospace, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>插件拼接 / Composition</h1>
+    <span id="status">正在读取 / Loading…</span>
+    <button id="refresh">刷新树 / Refresh</button>
+    <button id="apply" class="primary">应用补丁 / Apply</button>
+  </header>
+  <main>
+    <section id="tree">
+      <h2>已组合的插件树 / Loaded plugin tree</h2>
+      <table>
+        <thead>
+          <tr><th>id</th><th>模块 / module</th><th>状态</th><th>config</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+    <section id="patch">
+      <h2>用户补丁层 / User patch ($DSH_HOME/cordis.patch.yml)</h2>
+      <textarea id="patch-text" spellcheck="false" placeholder="[]"></textarea>
+    </section>
+  </main>
+  <script>
+    const rows = document.getElementById('rows')
+    const status = document.getElementById('status')
+    const patchText = document.getElementById('patch-text')
+    const composition = window.dshDesktop.composition
+
+    function setStatus(text, kind) {
+      status.textContent = text
+      status.className = kind || ''
+    }
+
+    function renderTree(entries) {
+      rows.replaceChildren()
+      if (entries.length === 0) {
+        const row = document.createElement('tr')
+        const cell = document.createElement('td')
+        cell.colSpan = 4
+        cell.textContent = '没有可读取的条目 / No entries available'
+        row.append(cell)
+        rows.append(row)
+        return
+      }
+      for (const entry of entries) {
+        const row = document.createElement('tr')
+        const id = document.createElement('td')
+        id.className = 'mono'
+        id.textContent = entry.id || ''
+        const name = document.createElement('td')
+        name.className = 'mono'
+        name.textContent = entry.name || ''
+        const enabled = document.createElement('td')
+        const tag = document.createElement('span')
+        tag.className = entry.disabled ? 'tag off' : 'tag on'
+        tag.textContent = entry.disabled ? '已禁用 / disabled' : '已启用 / enabled'
+        enabled.append(tag)
+        const config = document.createElement('td')
+        const pre = document.createElement('pre')
+        pre.className = 'detail'
+        pre.textContent = JSON.stringify(entry.config, null, 2)
+        config.append(pre)
+        row.append(id, name, enabled, config)
+        rows.append(row)
+      }
+    }
+
+    async function refresh() {
+      setStatus('正在刷新 / Refreshing…')
+      try {
+        renderTree(await composition.dump())
+        patchText.value = await composition.readPatch()
+        setStatus('已同步 / Synced', 'ok')
+      } catch (error) {
+        setStatus('刷新失败 / Refresh failed: ' + error, 'error')
+      }
+    }
+
+    document.getElementById('refresh').addEventListener('click', refresh)
+    document.getElementById('apply').addEventListener('click', async () => {
+      setStatus('正在应用 / Applying…')
+      try {
+        await composition.writePatch(patchText.value)
+        setStatus('已保存，热重载中 / Saved, reloading', 'ok')
+        setTimeout(refresh, 1200)
+      } catch (error) {
+        setStatus('应用失败 / Apply failed: ' + error, 'error')
+      }
+    })
+
+    refresh()
+  </script>
+</body>
+</html>

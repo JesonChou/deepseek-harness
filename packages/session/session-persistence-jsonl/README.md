@@ -24,6 +24,7 @@ The JSONL durable session-persistence backend — a concrete `SessionPersistence
 | Key | Type | Notes |
 |---|---|---|
 | `root` | `string` (required) | Root directory for all session files. **No default** — a `process.cwd()` default would scatter files as the process's cwd changes (bash calls, subprocesses). An existing root must be a readable directory; an absent root is created on first materialization. |
+| `projectRoots` | `string[]` (default `[]`) | Extra project-local scopes. A session whose cwd is one of these roots or below stores under `<project-root>/.dsh/sessions` instead of `root`, longest matching root first; every other session keeps `root`. The owning deployment replaces the live set through `setProjectRoots()`. |
 | `packChunks` | `boolean` (default `true`) | Write eligible delta-chunk runs as packed rows (~60% smaller logical logs measured on a real coding session). Set `false` for one-event-per-line diagnostics; reading packed rows works regardless of this write-side switch. |
 | `compression` | `'zstd' \| 'none'` | Defaults to `'zstd'`; `'none'` retains newline-delimited UTF-8 text. |
 | `preparedSessionCacheSize` | positive integer (default `5`) | Maximum unpublished Sessions retained after cold history inspection for reuse by resume. |

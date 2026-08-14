@@ -10,7 +10,7 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { readdirSync } from 'node:fs'
 import { open, mkdir, readFile, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
 import { randomBytes } from 'node:crypto'
@@ -66,6 +66,15 @@ export interface Config {
    * readable directory; an absent root is created on first materialization.
    */
   root: string
+  /**
+   * Extra project-local storage scopes. Each entry names an existing project
+   * root directory; a session whose cwd is that root or one of its
+   * subdirectories stores under `<project-root>/.dsh/sessions` instead of
+   * `root`. Sessions outside every project root, and sessions without a cwd,
+   * keep using `root`. The list is the initial scope set; the owning
+   * deployment may replace it at runtime through {@link JsonlSessionPersistence.setProjectRoots}.
+   */
+  projectRoots?: string[]
   /**
    * Write runs of consecutive `assistant/chunk` delta events as packed
    * `text-chunks`/`reasoning-chunks`/`tool-call-chunks` rows (lossless,
@@ -125,6 +134,7 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
 
   static Config: z<Config> = z.object({
     root: z.string().required(),
+    projectRoots: z.array(z.string()).default([]),
     packChunks: z.boolean().default(DEFAULT_PACK_CHUNKS),
     compression: JsonlCompressionSchema,
     preparedSessionCacheSize: z.number().step(1).min(1).default(DEFAULT_PREPARED_SESSION_CACHE_SIZE),
@@ -139,16 +149,18 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
    */
   override readonly name = 'session-persistence-jsonl'
 
-  private root: string
+  private readonly root: string
   private packChunks: boolean
   private compression: JsonlCompression
   private coordinator: PersistenceCoordinator<JsonlTornMarker>
-  private rootEncodingCheck: Promise<void> | undefined
+  private readonly projectScopes = new Map<string, string>()
+  private readonly rootEncodingChecks = new Map<string, Promise<void>>()
 
   constructor(ctx: Context, public config: Config) {
     super(ctx)
     // Resolve once so later process.cwd() changes cannot split one backend across roots.
     this.root = resolve(config.root)
+    this.setProjectRoots(config.projectRoots ?? [])
     // Programmatic wrappers may construct the backend without Schemastery normalization.
     const preparedSessionCacheSize = config.preparedSessionCacheSize
       ?? DEFAULT_PREPARED_SESSION_CACHE_SIZE
@@ -156,7 +168,7 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
       ?? DEFAULT_WRITE_BATCH_MAX_DELAY_MS
     this.packChunks = config.packChunks ?? DEFAULT_PACK_CHUNKS
     this.compression = config.compression ?? DEFAULT_COMPRESSION
-    this.assertUsableRoot()
+    this.assertUsableRoot(this.root)
     this.coordinator = new PersistenceCoordinator<JsonlTornMarker>(this.ctx, this, {
       preparedSessionCacheSize,
       writeBatchMaxDelayMs,
@@ -168,9 +180,45 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
   /* jscpd:ignore-start */
   // --- SessionPersistence service API (delegated to the coordinator) ---
 
+  /**
+   * Replace the active project-local storage scopes. A project root owns
+   * `<project-root>/.dsh/sessions`; sessions under that root resolve there,
+   * longest root first, and everything else resolves to the configured
+   * fallback root. Removing a root hides its sessions from this backend
+   * without deleting them: they stay on disk and reappear if the root is
+   * added again. A root that exists but is not a readable directory fails
+   * loud; an absent root is accepted and created on first materialization.
+   * @param projectRoots - the complete project-root set this backend serves.
+   */
+  public setProjectRoots(projectRoots: readonly string[]): void {
+    this.projectScopes.clear()
+    for (const projectRoot of projectRoots) {
+      const resolved = resolve(projectRoot)
+      this.projectScopes.set(resolved, join(resolved, '.dsh', 'sessions'))
+    }
+    for (const scope of this.projectScopes.values()) this.assertUsableRoot(scope)
+  }
+
+  /** Resolve the storage scope directory one session cwd belongs to. */
+  private scopeDirFor(cwd: string | undefined): string {
+    if (cwd === undefined) return this.root
+    let longest: string | undefined
+    for (const projectRoot of this.projectScopes.keys()) {
+      if (cwd === projectRoot || cwd.startsWith(projectRoot + sep)) {
+        if (longest === undefined || projectRoot.length > longest.length) longest = projectRoot
+      }
+    }
+    return longest === undefined ? this.root : this.projectScopes.get(longest) as string
+  }
+
+  /** Every storage scope directory in routing order: project scopes, then the fallback root. */
+  private scopeDirs(): string[] {
+    return [...this.projectScopes.values(), this.root]
+  }
+
   /** Resolve the absolute target path without touching the filesystem. */
   locate(meta: SessionHeader): SessionLocation {
-    return { kind: 'jsonl', path: logPath(this.root, meta.cwd, meta.id, this.compression) }
+    return { kind: 'jsonl', path: logPath(this.scopeDirFor(meta.cwd), meta.cwd, meta.id, this.compression) }
   }
 
   create(meta: SessionHeader): Promise<void> {
@@ -475,33 +523,35 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     signal?.throwIfAborted()
     const artifacts: Array<{ header: SessionHeader; path: string }> = []
     const ids = new Set<SessionId>()
-    for (const project of await this.listProjectDirs(signal)) {
-      signal?.throwIfAborted()
-      for (const dir of await this.listSessionDirs(project, signal)) {
+    for (const root of this.scopeDirs()) {
+      for (const project of await this.listProjectDirs(root, signal)) {
         signal?.throwIfAborted()
-        const opposite = join(dir, `session${logSuffix(this.oppositeCompression())}`)
-        const oppositeExists = await this.exists(opposite)
-        signal?.throwIfAborted()
-        if (oppositeExists) throw this.encodingMismatch(opposite)
-        const path = join(dir, `session${logSuffix(this.compression)}`)
-        const pathExists = await this.exists(path)
-        signal?.throwIfAborted()
-        if (!pathExists) continue
-        // Read only headers so listing scales with session count, not log size.
-        const first = this.compression === 'zstd'
-          ? await this.readFirstZstdLine(path, signal)
-          : await this.readFirstLine(path, signal)
-        signal?.throwIfAborted()
-        if (first === undefined) continue // empty/half-written file
-        const meta = parseHeaderMeta(first)
-        if (meta === undefined) continue // not a session header
-        await this.assertStoredIdentity(path, meta, undefined, signal)
-        signal?.throwIfAborted()
-        if (ids.has(meta.id)) {
-          throw new Error(`duplicate JSONL session id "${meta.id}" appears in multiple project directories`)
+        for (const dir of await this.listSessionDirs(project, signal)) {
+          signal?.throwIfAborted()
+          const opposite = join(dir, `session${logSuffix(this.oppositeCompression())}`)
+          const oppositeExists = await this.exists(opposite)
+          signal?.throwIfAborted()
+          if (oppositeExists) throw this.encodingMismatch(opposite)
+          const path = join(dir, `session${logSuffix(this.compression)}`)
+          const pathExists = await this.exists(path)
+          signal?.throwIfAborted()
+          if (!pathExists) continue
+          // Read only headers so listing scales with session count, not log size.
+          const first = this.compression === 'zstd'
+            ? await this.readFirstZstdLine(path, signal)
+            : await this.readFirstLine(path, signal)
+          signal?.throwIfAborted()
+          if (first === undefined) continue // empty/half-written file
+          const meta = parseHeaderMeta(first)
+          if (meta === undefined) continue // not a session header
+          await this.assertStoredIdentity(path, meta, undefined, signal)
+          signal?.throwIfAborted()
+          if (ids.has(meta.id)) {
+            throw new Error(`duplicate JSONL session id "${meta.id}" appears in multiple project directories`)
+          }
+          ids.add(meta.id)
+          artifacts.push({ header: meta, path })
         }
-        ids.add(meta.id)
-        artifacts.push({ header: meta, path })
       }
     }
     signal?.throwIfAborted()
@@ -512,31 +562,33 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
 
   /** Atomically write the header line + first batch (temp-write, fsync, publish). */
   private async materialize(meta: SessionHeader, events: readonly SessionEvent[]): Promise<void> {
-    const project = projectDir(this.root, meta.cwd)
-    const dir = sessionDir(this.root, meta.cwd, meta.id)
-    const finalPath = logPath(this.root, meta.cwd, meta.id, this.compression)
+    const root = this.scopeDirFor(meta.cwd)
+    const project = projectDir(root, meta.cwd)
+    const dir = sessionDir(root, meta.cwd, meta.id)
+    const finalPath = logPath(root, meta.cwd, meta.id, this.compression)
     await this.rejectOppositeArtifact(meta.cwd, meta.id)
     const content = await this.encodeMaterialization(meta, events)
     /* v8 ignore next -- native Windows coverage exercises this platform dispatch; Linux covers the POSIX peer */
     if (process.platform === 'win32') {
-      await this.materializeWin32(project, dir, finalPath, meta.id, content)
+      await this.materializeWin32(root, project, dir, finalPath, meta.id, content)
     } else {
-      await this.materializePosix(project, dir, finalPath, meta.id, content)
+      await this.materializePosix(root, project, dir, finalPath, meta.id, content)
     }
   }
 
   /* v8 ignore start -- Windows uses the Win32 durable-publish path; POSIX coverage exercises this peer. */
   private async materializePosix(
+    root: string,
     project: string,
     dir: string,
     finalPath: string,
     id: SessionId,
     content: Buffer | string,
   ): Promise<void> {
-    await mkdir(this.root, { recursive: true, mode: 0o700 })
-    await this.syncDirPosix(dirname(this.root))
+    await mkdir(root, { recursive: true, mode: 0o700 })
+    await this.syncDirPosix(dirname(root))
     await mkdir(project, { recursive: true, mode: 0o700 })
-    await this.syncDirPosix(this.root)
+    await this.syncDirPosix(root)
     await mkdir(dir, { recursive: true, mode: 0o700 })
     await this.syncDirPosix(project)
     await this.rejectExistingLog(finalPath, id)
@@ -571,13 +623,14 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
 
   /* v8 ignore start -- native Windows coverage exercises this integration path */
   private async materializeWin32(
+    root: string,
     project: string,
     dir: string,
     finalPath: string,
     id: SessionId,
     content: Buffer | string,
   ): Promise<void> {
-    await ensureDurableDirectoryWin32(this.root)
+    await ensureDurableDirectoryWin32(root)
     await ensureDurableDirectoryWin32(project)
     await ensureDurableDirectoryWin32(dir)
     await this.rejectExistingLog(finalPath, id)
@@ -650,7 +703,7 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
    */
   private async appendLines(meta: SessionHeader, events: readonly SessionEvent[]): Promise<void> {
     const content = await this.encodeEventBatch(events)
-    const path = logPath(this.root, meta.cwd, meta.id, this.compression)
+    const path = logPath(this.scopeDirFor(meta.cwd), meta.cwd, meta.id, this.compression)
     const handle = await open(path, 'a')
     let closed = false
     const closeAppendHandle = async (): Promise<void> => {
@@ -690,7 +743,7 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
 
   /** Truncate the log file to `offset` bytes and fsync (discard the crash tail). */
   private async repair(meta: SessionHeader, offset: number): Promise<void> {
-    const path = logPath(this.root, meta.cwd, meta.id, this.compression)
+    const path = logPath(this.scopeDirFor(meta.cwd), meta.cwd, meta.id, this.compression)
     await truncate(path, offset)
     const handle = await open(path, 'r+')
     try {
@@ -770,22 +823,24 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     }
   }
 
-  /** Find the unique physical log for an id across every project directory. */
+  /** Find the unique physical log for an id across every scope and project directory. */
   private async findLog(id: SessionId, signal?: AbortSignal): Promise<string | undefined> {
     const matches: string[] = []
-    for (const project of await this.listProjectDirs(signal)) {
-      signal?.throwIfAborted()
-      await this.rejectLegacyFlatArtifact(project, id, signal)
-      signal?.throwIfAborted()
-      const dir = join(project, encodeSegment(id))
-      const path = join(dir, `session${logSuffix(this.compression)}`)
-      const opposite = join(dir, `session${logSuffix(this.oppositeCompression())}`)
-      const oppositeExists = await this.exists(opposite)
-      signal?.throwIfAborted()
-      if (oppositeExists) throw this.encodingMismatch(opposite)
-      const pathExists = await this.exists(path)
-      signal?.throwIfAborted()
-      if (pathExists) matches.push(path)
+    for (const root of this.scopeDirs()) {
+      for (const project of await this.listProjectDirs(root, signal)) {
+        signal?.throwIfAborted()
+        await this.rejectLegacyFlatArtifact(project, id, signal)
+        signal?.throwIfAborted()
+        const dir = join(project, encodeSegment(id))
+        const path = join(dir, `session${logSuffix(this.compression)}`)
+        const opposite = join(dir, `session${logSuffix(this.oppositeCompression())}`)
+        const oppositeExists = await this.exists(opposite)
+        signal?.throwIfAborted()
+        if (oppositeExists) throw this.encodingMismatch(opposite)
+        const pathExists = await this.exists(path)
+        signal?.throwIfAborted()
+        if (pathExists) matches.push(path)
+      }
     }
     if (matches.length > 1) {
       throw new Error(`duplicate JSONL session id "${id}" appears in multiple project directories`)
@@ -794,10 +849,10 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     return matches[0]
   }
 
-  /** Require an existing configured root to be a readable directory. */
-  private assertUsableRoot(): void {
+  /** Require an existing scope directory to be a readable directory. */
+  private assertUsableRoot(root: string): void {
     try {
-      readdirSync(this.root)
+      readdirSync(root)
     } catch (error) {
       if (isENOENT(error)) return
       throw error
@@ -815,14 +870,21 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     if (expectedId !== undefined && meta.id !== expectedId) {
       throw new Error(`corrupt session log "${path}": requested id "${expectedId}" does not match header id "${meta.id}"`)
     }
-    let expectedPath: string
+    let expectedPaths: string[]
     try {
-      expectedPath = logPath(this.root, meta.cwd, meta.id, this.compression)
+      expectedPaths = this.scopeDirs().map(root => logPath(root, meta.cwd, meta.id, this.compression))
     } catch (error) {
       throw new Error(`corrupt session log "${path}": header id cannot name a storage path`, { cause: error })
     }
-    if (path !== expectedPath && !await this.sameFile(path, expectedPath, signal)) {
-      throw new Error(`corrupt session log "${path}": header id "${meta.id}" and cwd identify "${expectedPath}"`)
+    let matchesScope = false
+    for (const expectedPath of expectedPaths) {
+      if (path === expectedPath || await this.sameFile(path, expectedPath, signal)) {
+        matchesScope = true
+        break
+      }
+    }
+    if (!matchesScope) {
+      throw new Error(`corrupt session log "${path}": header id "${meta.id}" and cwd identify "${expectedPaths.join('" or "')}"`)
     }
     signal?.throwIfAborted()
   }
@@ -847,13 +909,13 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     }
   }
 
-  /** The human-readable project directories under the configured root. */
-  private async listProjectDirs(signal?: AbortSignal): Promise<string[]> {
+  /** The human-readable project directories under one scope directory. */
+  private async listProjectDirs(root: string, signal?: AbortSignal): Promise<string[]> {
     try {
       signal?.throwIfAborted()
-      const entries = await readdir(this.root, { withFileTypes: true })
+      const entries = await readdir(root, { withFileTypes: true })
       signal?.throwIfAborted()
-      return entries.filter(e => e.isDirectory()).map(e => join(this.root, e.name))
+      return entries.filter(e => e.isDirectory()).map(e => join(root, e.name))
     } catch (error) {
       // Only an absent root means no sessions; rethrow every other I/O failure.
       if (isENOENT(error)) return []
@@ -872,14 +934,19 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     return entries.filter(entry => entry.isDirectory()).map(entry => join(project, entry.name))
   }
 
-  /** Reject a root that already belongs to the other physical encoding. */
+  /** Reject a scope that already belongs to the other physical encoding. */
   private ensureRootEncoding(): Promise<void> {
-    this.rootEncodingCheck ??= this.checkRootEncoding()
-    return this.rootEncodingCheck
+    return Promise.all(this.scopeDirs().map((root) => {
+      const existing = this.rootEncodingChecks.get(root)
+      if (existing !== undefined) return existing
+      const check = this.checkRootEncoding(root)
+      this.rootEncodingChecks.set(root, check)
+      return check
+    })).then(() => undefined)
   }
 
-  private async checkRootEncoding(): Promise<void> {
-    for (const project of await this.listProjectDirs()) {
+  private async checkRootEncoding(root: string): Promise<void> {
+    for (const project of await this.listProjectDirs(root)) {
       for (const dir of await this.listSessionDirs(project)) {
         const incompatible = join(dir, `session${logSuffix(this.oppositeCompression())}`)
         if (await this.exists(incompatible)) throw this.encodingMismatch(incompatible)
@@ -903,7 +970,7 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
   }
 
   private async rejectOppositeArtifact(cwd: string | undefined, id: SessionId): Promise<void> {
-    const path = logPath(this.root, cwd, id, this.oppositeCompression())
+    const path = logPath(this.scopeDirFor(cwd), cwd, id, this.oppositeCompression())
     if (await this.exists(path)) throw this.encodingMismatch(path)
   }
 

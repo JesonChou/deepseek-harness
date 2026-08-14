@@ -24,6 +24,7 @@ JSONL 持久会话存储后端：`SessionPersistence` 的一个具体实现（`d
 | 键 | 类型 | 说明 |
 |---|---|---|
 | `root` | `string`（必需） | 所有会话文件的根目录。**无默认值**：`process.cwd()` 默认值会随进程 cwd 变更（bash 调用、子进程）而分散文件。现有根必须是可读目录；缺失根在第一次实体化时创建。 |
+| `projectRoots` | `string[]`（默认 `[]`） | 额外的项目本地作用域。cwd 等于其中某个根或其子目录的会话改存到 `<project-root>/.dsh/sessions` 而不是 `root`，最长匹配根优先；其余会话保留 `root`。所属部署通过 `setProjectRoots()` 替换活跃集合。 |
 | `packChunks` | `boolean`（默认 `true`） | 将符合条件的 delta 分片连续段写为打包行（在真实编程会话上测得逻辑日志约小 60%）。设为 `false` 可用于每事件一行诊断；无论该写入侧开关如何，都能读取打包行。 |
 | `compression` | `'zstd' \| 'none'` | 默认 `'zstd'`；`'none'` 保留换行分隔 UTF-8 文本。 |
 | `preparedSessionCacheSize` | 正整数（默认 `5`） | 冷历史检查后保留、供恢复复用的未发布会话数量上限。 |

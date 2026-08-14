@@ -1,0 +1,4 @@
+# DeepSeek Harness desktop root: an empty entry list. The tree is composed as
+# patch layers: dsh-base, dsh-web-app, the desktop overlay, then the user-level
+# $DSH_HOME/cordis.patch.yml. Edit the user patch, not this file.
+[]
