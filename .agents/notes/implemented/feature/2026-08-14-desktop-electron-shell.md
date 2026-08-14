@@ -6,7 +6,7 @@ English | [中文](2026-08-14-desktop-electron-shell.zh.md)
 
 ## Problem
 
-`dsh` ships browser and headless surfaces. Users want an installable Windows desktop application with ordinary install, launch, and uninstall behavior. The GUI layering reserved the Electron shape ([web-server layering](../../architecture/2026-07-19-gui-layering-and-rpc-protocol.md)) but no shell, transport bridge, or packaging existed.
+`dsh` ships browser and headless surfaces. Users want an installable Windows desktop application with ordinary install, launch, and uninstall behavior. The GUI layering reserved the Electron shape ([web-server layering](../architecture/2026-07-19-gui-layering-and-rpc-protocol.md)) but no shell, transport bridge, or packaging existed.
 
 ## Decision
 

@@ -6,7 +6,7 @@ Status: implemented
 
 ## Problem
 
-`dsh` 目前只提供浏览器和 headless 两种形态。用户需要一款可安装的 Windows 桌面应用，具备常规的安装、启动和卸载体验。GUI 分层早已为 Electron 预留了形态（[web-server 分层](../../architecture/2026-07-19-gui-layering-and-rpc-protocol.md)），但当时还没有外壳、传输桥和打包方案。
+`dsh` 目前只提供浏览器和 headless 两种形态。用户需要一款可安装的 Windows 桌面应用，具备常规的安装、启动和卸载体验。GUI 分层早已为 Electron 预留了形态（[web-server 分层](../architecture/2026-07-19-gui-layering-and-rpc-protocol.md)），但当时还没有外壳、传输桥和打包方案。
 
 ## Decision
 

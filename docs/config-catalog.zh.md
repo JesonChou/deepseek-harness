@@ -1564,6 +1564,15 @@ export interface Config {
    */
   root: string
   /**
+   * Extra project-local storage scopes. Each entry names an existing project
+   * root directory; a session whose cwd is that root or one of its
+   * subdirectories stores under `<project-root>/.dsh/sessions` instead of
+   * `root`. Sessions outside every project root, and sessions without a cwd,
+   * keep using `root`. The list is the initial scope set; the owning
+   * deployment may replace it at runtime through {@link JsonlSessionPersistence.setProjectRoots}.
+   */
+  projectRoots?: string[]
+  /**
    * Write runs of consecutive `assistant/chunk` delta events as packed
    * `text-chunks`/`reasoning-chunks`/`tool-call-chunks` rows (lossless,
    * ~60% smaller logs measured on a real session). Defaults to true; false
