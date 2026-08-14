@@ -5,6 +5,7 @@
  * scripts target Windows PowerShell 5.1.
  */
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { createServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import { dirname, join } from 'node:path'
@@ -12,6 +13,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const launcherPath = join(dirname(fileURLToPath(import.meta.url)), 'launch-web.ps1')
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+const builtCli = join(repoRoot, 'apps', 'cli', 'lib', 'bin.js')
 // Absolute executable path: spawn resolution must not depend on the child's PATH,
 // which the missing-Node.js test strips on purpose.
 const powershellPath = join(
@@ -65,7 +68,12 @@ suite('scripts/launch-web.ps1', () => {
     await close()
     const result = invokeLauncher(['-Port', String(port), '-NoBrowser', '-NonInteractive', '-DryRun'])
     expect(result.status).toBe(0)
-    expect(result.stdout).toContain('npx --yes @deepseek-ai/dsh web --port ' + String(port))
+    if (existsSync(builtCli)) {
+      expect(result.stdout).toContain('node "' + builtCli + '" web --port ' + String(port))
+    }
+    else {
+      expect(result.stdout).toContain('npx --yes @deepseek-ai/dsh web --port ' + String(port))
+    }
   })
 
   it('only reports the running server on an occupied port and opens no browser', async () => {

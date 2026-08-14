@@ -4,8 +4,9 @@
 Stops the DeepSeek Harness Web server listening on a port.
 .DESCRIPTION
 Finds the process listening on the port and stops it after confirming it is a node process
-whose command line names dsh. Refuses other port owners. Closing the server's minimized
-console window stops it the same way.
+whose command line names dsh or the checkout's built CLI (apps\cli\lib\bin.js). Refuses
+other port owners. This is the only way to stop the server: the launcher starts it in a
+hidden window.
 .PARAMETER Port
 HTTP port to free. Defaults to 3080.
 .EXAMPLE
@@ -30,7 +31,7 @@ $stopped = 0
 foreach ($processId in $processIds) {
   $process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
   if (-not $process) { continue }
-  if ($process.Name -ne 'node.exe' -or $process.CommandLine -notmatch 'dsh') {
+  if ($process.Name -ne 'node.exe' -or $process.CommandLine -notmatch 'dsh|bin\.js') {
     Write-Warning "[stop-web] port $Port owner (PID $processId, $($process.Name)) is not a dsh server; leaving it alone"
     continue
   }

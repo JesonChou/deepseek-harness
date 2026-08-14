@@ -12,12 +12,12 @@ Status: implemented
 
 仓库在 `scripts/` 下提供四个纯 Windows 脚本，不新增运行时依赖：
 
-- `launch-web.ps1` 是启动器。端口已接受连接时它只打开浏览器，因此再次双击会重新打开 UI。否则它在最小化的控制台窗口中启动发布包（`npx --yes @deepseek-ai/dsh web --port <port>`），轮询端口最长 120 秒，然后在 `http://127.0.0.1:<port>` 打开浏览器。`-NoBrowser`、`-NonInteractive` 和 `-DryRun` 服务于自动化与测试。
+- `launch-web.ps1` 是启动器。端口已接受连接时它只打开 UI 窗口，因此再次双击会重新打开 UI。否则它在隐藏的控制台窗口中启动 Web UI 服务器，轮询端口最长 120 秒，然后在 `http://127.0.0.1:<port>` 打开应用程序窗口——依次尝试已构建并安装的 [Electron 壳](../../feature/2026-08-15-desktop-electron-shell.md)、Edge `--app` 模式、Chrome `--app` 模式和默认浏览器，因此 UI 显示时没有标签栏和地址栏。启动命令优先使用检出目录已构建的 CLI（`node apps\cli\lib\bin.js web --port <port>`），并回退到发布包（`npx --yes @deepseek-ai/dsh web --port <port>`，从用户主目录运行）；这一分工由 [local-CLI bug-fix Agent Note](../../bug-fix/2026-08-14-windows-desktop-launcher-local-cli.md) 记录。`-NoBrowser`、`-NonInteractive` 和 `-DryRun` 服务于自动化与测试。
 - `launch-web.vbs` 无控制台窗口地运行启动器；它是快捷方式的目标，因此双击不会闪现窗口。
-- `stop-web.ps1` 在确认命令行包含 `dsh` 后停止监听该端口的 node 进程；它拒绝其他端口占用者。关闭最小化的控制台窗口同样能停止服务器。
+- `stop-web.ps1` 在确认命令行包含 `dsh` 或 `bin.js` 后停止监听该端口的 node 进程；它拒绝其他端口占用者，是停止隐藏服务器的唯一方式。
 - `create-web-shortcut.ps1` 写入桌面快捷方式，目标为 `wscript.exe`（参数为 vbs），图标为 `scripts/launch-web.ico`。
 
-启动器包装发布包流程而非源码检出：它与 README 的 npm 路径一致，且不需要仓库构建。脚本面向每台受支持 Windows 都自带的 Windows PowerShell 5.1；除 `-NonInteractive` 模式外，失败以弹窗显示。
+启动器优先使用检出目录已构建的 CLI，这与仓库运行自身 Web UI 的方式一致且不需要网络；发布包路径保留为未构建产物检出时的回退。脚本面向每台受支持 Windows 都自带的 Windows PowerShell 5.1；除 `-NonInteractive` 模式外，失败以弹窗显示。
 
 ## 考虑过的替代方案
 
@@ -31,8 +31,8 @@ Status: implemented
 
 ## 后果
 
-脚本仅限 Windows；spec 在其他平台上跳过。`stop-web.ps1` 会停止任何占用该端口的 node `dsh` 进程，包括手动启动的服务器。升级沿用 npx 的包解析。图标由 `apps/web/public/favicon.svg` 生成并作为静态资产提交。
+脚本仅限 Windows；spec 在其他平台上跳过。`stop-web.ps1` 会停止任何占用该端口的 node `dsh` 进程，包括手动启动的服务器。服务的版本跟随检出的构建（`apps/cli/lib`），npx 回退沿用 npx 的包解析。图标由 `apps/web/public/favicon.svg` 生成（鲸鱼改为品牌蓝，打包为多尺寸 DIB 条目以保证 Windows 端透明解码）并作为静态资产提交。
 
 ## 测试
 
-`scripts/launch-web.spec.ts` 仅在 Windows 上运行，覆盖已监听分支、试运行和缺少 Node.js 的前置检查失败。快照转录不适用：启动器不产生模型可见的行为。
+`scripts/launch-web.spec.ts` 仅在 Windows 上运行，覆盖已监听分支、试运行（检出已构建时断言本地 CLI 命令，否则断言 npx 回退）和缺少 Node.js 的前置检查失败。快照转录不适用：启动器不产生模型可见的行为。

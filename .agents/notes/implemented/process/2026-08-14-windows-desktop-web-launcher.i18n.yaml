@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-14-windows-desktop-web-launcher.md
-2026-08-14-windows-desktop-web-launcher.md: 95fbf90293666b8ef7802014264c3df8c0384308
-2026-08-14-windows-desktop-web-launcher.zh.md: 9d726d95b7f1cd74275cbc3a63714c4ee8d2068a
+2026-08-14-windows-desktop-web-launcher.md: 412aec242d04b33e39db89d105d65354e082794e
+2026-08-14-windows-desktop-web-launcher.zh.md: a6bc51b1bec994869995d785518902a4d54443b9

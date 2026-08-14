@@ -12,7 +12,7 @@
 powershell -ExecutionPolicy Bypass -File scripts\create-web-shortcut.ps1
 ```
 
-双击桌面上的 **DeepSeek Harness Web** 快捷方式：启动器会运行 `npx --yes @deepseek-ai/dsh web`，等服务就绪后在默认浏览器中打开命令打印的地址。服务器运行在最小化的控制台窗口中；关闭该窗口或运行 `scripts\stop-web.ps1` 即可停止。
+双击桌面上的 **DeepSeek Harness Web** 快捷方式：启动器会在隐藏窗口中运行本仓库已构建的 CLI（`node apps\cli\lib\bin.js web`；CLI 未构建时回退到 `npx --yes @deepseek-ai/dsh web`），等服务就绪后把 Web UI 打开为独立的 Electron 窗口（壳未构建时回退到 Edge/Chrome `--app` 模式），没有标签栏和地址栏。再次双击会聚焦已有窗口。Electron 窗口拥有独立的浏览器状态：首次使用时在窗口内配置模型 API 密钥。运行 `scripts\stop-web.ps1` 即可停止服务器。
 
 ## 配置模型
 
