@@ -13,6 +13,7 @@ Status: implemented
 `apps/desktop` 是一个最小 Electron 壳：单个主进程文件，把 Web UI 渲染在独立的 `BrowserWindow` 中（无标签栏、无地址栏），不做其他事。启动器继续负责服务启动与端口轮询；壳只负责画窗口。具体：
 
 - **单实例 + 聚焦。** `app.requestSingleInstanceLock()` 加 `second-instance` 处理器恢复并聚焦已有窗口，因此再次双击会重新打开 UI 而不是叠加窗口。
+- **关闭即停 Host。** 关闭窗口会退出壳，并先通过 `scripts/stop-web.ps1` 停止 Web Host，应用式退出不会留下孤儿服务。停止在 `before-quit` 内同步执行：detached 子进程会随 Electron 的 Windows Job Object 在进程退出时一起死掉，因此脚本必须在壳仍存活时跑完。`--smoke` 使用 `app.exit`，不会停止 Host。
 - **独立 userData。** 未打包的 Electron 应用默认使用 `%APPDATA%\Electron`，会与机器上其他 Electron 应用（如 Reasonix）共享状态和单实例锁。壳在取锁前把 `userData` 设为 `%APPDATA%\DeepSeekHarnessWeb`。
 - **动态 electron import。** Electron 38 的 ESM 主进程 loader 下，顶层静态 `import 'electron'` 表现不稳定（进程在运行任何代码前间歇性退出）；整个主体运行在 `import('electron').then(...)` 内，加载可靠。`import type` 声明保持静态，编译期被擦除。
 - **`--smoke` 无头验证。** 带 `--smoke` 时壳把进度写入 `apps/desktop/tmp/desktop-smoke.log`（已 gitignore；GUI 子系统丢弃 stdout），`loadURL` 成功后退出 0，失败退出 1。启动器不会传 `--smoke`。

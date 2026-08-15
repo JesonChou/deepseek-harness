@@ -5,7 +5,9 @@
  * this process only renders the Web UI in a standalone window. The URL comes
  * from the DSH_WEB_URL environment variable the launcher sets, from --url=...,
  * or from the default. A second launch while a window exists focuses the
- * existing window instead of opening another one.
+ * existing window instead of opening another one. Closing the window quits
+ * the app and stops the Web Host through scripts/stop-web.ps1, so an
+ * app-style exit leaves no orphaned server.
  *
  * Run `electron apps/desktop --smoke` to load the URL headlessly and exit 0 on
  * success (1 on failure); the launcher never passes --smoke.
@@ -14,10 +16,12 @@
  * builtin are flaky under Electron 38's ESM main-process loader.
  * @module @deepseek-ai/dsh-desktop
  */
+import { spawnSync } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { BrowserWindow as BrowserWindowType, HandlerDetails } from 'electron'
+import type { BrowserWindow as BrowserWindowType, Event, HandlerDetails } from 'electron'
+import { resolveStopWebCommand } from './stop-web.js'
 import { resolveWebUrl } from './url.js'
 
 const desktopRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -44,6 +48,7 @@ void import('electron').then(({ app, BrowserWindow, shell }) => {
   }
 
   let mainWindow: BrowserWindowType | undefined
+  let quitReleased = false
 
   app.setAppUserModelId('com.deepseek.dsh-web')
 
@@ -52,6 +57,21 @@ void import('electron').then(({ app, BrowserWindow, shell }) => {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
     }
+  })
+
+  app.on('before-quit', (event: Event) => {
+    if (quitReleased) return
+    // Stop the Web Host synchronously before the process exits: a detached
+    // child would die with Electron's Windows Job Object, so the stop script
+    // must finish while this process is still alive.
+    event.preventDefault()
+    const command = resolveStopWebCommand(resolveWebUrl(process.argv, process.env), process.env)
+    if (command) {
+      const result = spawnSync(command.file, [...command.args], { stdio: 'ignore', windowsHide: true })
+      log(`stop-web exited with ${String(result.status)}`)
+    }
+    quitReleased = true
+    app.quit()
   })
 
   app.on('window-all-closed', () => {

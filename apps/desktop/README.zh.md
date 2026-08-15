@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-把 DeepSeek Harness Web UI 渲染为独立窗口的最小 Electron 壳：没有标签栏和地址栏，再次启动会聚焦已有窗口而非新开。Windows 桌面启动器（[`scripts/launch-web.ps1`](../../scripts/launch-web.ps1)）负责服务启动并优先使用本壳而非浏览器；本包只负责绘制窗口。
+把 DeepSeek Harness Web UI 渲染为独立窗口的最小 Electron 壳：没有标签栏和地址栏，再次启动会聚焦已有窗口而非新开。关闭窗口会退出壳并通过 `scripts/stop-web.ps1` 停止 Web Host，应用式退出不会留下孤儿服务。Windows 桌面启动器（[`scripts/launch-web.ps1`](../../scripts/launch-web.ps1)）负责服务启动并优先使用本壳而非浏览器；本包只负责绘制窗口并在退出时停止 Host。
 
 ## 布局
 

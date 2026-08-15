@@ -12,7 +12,7 @@ On Windows you can start the Web UI like a desktop application. From a PowerShel
 powershell -ExecutionPolicy Bypass -File scripts\create-web-shortcut.ps1
 ```
 
-Double-click the **DeepSeek Harness Web** shortcut on your desktop: the launcher starts the checkout's built CLI (`node apps\cli\lib\bin.js web`; it falls back to `npx --yes @deepseek-ai/dsh web` when the CLI is not built) in a hidden window, waits until the server is ready, and opens the Web UI in a standalone Electron window (Edge/Chrome `--app` mode when the shell is not built) with no tabs or address bar. A second double-click focuses the existing window. The Electron window keeps its own browser state: configure the model API key inside it the first time. Run `scripts\stop-web.ps1` to stop the server.
+Double-click the **DeepSeek Harness Web** shortcut on your desktop: the launcher starts the checkout's built CLI (`node apps\cli\lib\bin.js web`; it falls back to `npx --yes @deepseek-ai/dsh web` when the CLI is not built) in a hidden window, waits until the server is ready, and opens the Web UI in a standalone Electron window (Edge/Chrome `--app` mode when the shell is not built) with no tabs or address bar. A second double-click focuses the existing window. Closing the window stops the server with it; `scripts\stop-web.ps1` stops a server that the shell did not start. The Electron window keeps its own browser state: configure the model API key inside it the first time.
 
 ## Configure a model
 

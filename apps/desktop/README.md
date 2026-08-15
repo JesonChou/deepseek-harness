@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Minimal Electron shell that renders the DeepSeek Harness Web UI in a standalone window: no tabs, no address bar, and a second launch focuses the existing window. The Windows desktop launcher ([`scripts/launch-web.ps1`](../../scripts/launch-web.ps1)) owns server startup and prefers this shell over the browser; this package itself only draws the window.
+Minimal Electron shell that renders the DeepSeek Harness Web UI in a standalone window: no tabs, no address bar, and a second launch focuses the existing window. Closing the window quits the shell and stops the Web Host through `scripts/stop-web.ps1`, so an app-style exit leaves no orphaned server. The Windows desktop launcher ([`scripts/launch-web.ps1`](../../scripts/launch-web.ps1)) owns server startup and prefers this shell over the browser; this package itself only draws the window and stops the Host on exit.
 
 ## Layout
 
